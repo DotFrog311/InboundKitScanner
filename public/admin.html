@@ -164,14 +164,23 @@ async function showReports() {
       <td>${l.period_start.slice(0,10)} → ${l.period_end.slice(0,10)}</td><td>${l.return_count}</td>
       <td>${l.recipients||'—'}</td><td>${l.status}${l.error ? ' — '+l.error : ''}</td></tr>`).join('') + '</table>';
 }
+function emailCard(meta, bodyHtml) {
+  return `<div style="border:1px solid var(--line);border-radius:8px;margin:14px 0;overflow:hidden">
+    <div style="background:#f1f5f9;padding:10px 14px;font-size:13px">${meta}</div>
+    <div style="padding:14px">${bodyHtml}</div></div>`;
+}
 async function runSummary(dry) {
   const res = await api('/api/admin/reports/customer-summary', { body: { dry_run: dry } });
-  rout.innerHTML = `<pre class="preview">${JSON.stringify(res.results.map(r =>
-    ({ customer:r.customer, count:r.count, recipients:r.recipients, status:r.status, subject:r.subject })), null, 2)}</pre>`;
+  rout.innerHTML = `<h3 style="margin:14px 0 4px">${dry ? 'Preview' : 'Send results'} — period ${res.period.label}</h3>` +
+    res.results.map(r => emailCard(
+      `<b>To:</b> ${r.recipients.join(', ') || '(no recipients configured)'} &nbsp; <b>Subject:</b> ${r.subject}
+       &nbsp; <b>Status:</b> ${r.status}${r.error ? ' — ' + r.error : ''}`,
+      r.html)).join('');
 }
 async function runBilling(dry) {
   const res = await api('/api/admin/reports/monthly-billing', { body: { dry_run: dry } });
-  rout.innerHTML = `<pre class="preview">${JSON.stringify({ period:res.label, total:res.total, perCustomer:res.rows, status:res.status }, null, 2)}</pre>`;
+  rout.innerHTML = `<h3 style="margin:14px 0 4px">${dry ? 'Preview' : 'Send result'} — ${res.label}</h3>` +
+    emailCard(`<b>To:</b> accounting (billing_email setting) &nbsp; <b>Status:</b> ${res.status}${res.error ? ' — ' + res.error : ''}`, res.html);
 }
 
 async function showSettings() {
