@@ -77,6 +77,12 @@ function check(name, cond, extra) {
     check('return saved', r.json.ok && r.json.record.id, r.json);
     r = await req('/api/returns/recent');
     check('recent list shows record', r.json.length === 1 && r.json[0].serial === 'J1234567');
+    r = await req('/api/returns/today');
+    check('today list shows record with operator', r.json.length === 1 && r.json[0].operator, r.json);
+    r = await req('/api/validate/serial', { scan: 'J1234567', customer_id: junction.id });
+    check('re-scan of received serial reports duplicate', r.json.ok && r.json.duplicate && r.json.duplicate.operator, r.json);
+    r = await req('/api/validate/serial', { scan: 'J7654321', customer_id: junction.id });
+    check('fresh serial has no duplicate flag', r.json.ok && !r.json.duplicate, r.json);
 
     console.log('reports (dry run)');
     r = await req('/api/admin/reports/customer-summary', { dry_run: true });

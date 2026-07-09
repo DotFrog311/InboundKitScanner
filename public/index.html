@@ -16,8 +16,20 @@
            padding:12px 24px; background:var(--panel); font-size:15px; }
   header .who { color:var(--dim); }
   header .who b { color:var(--text); }
+  #wrap { flex:1; display:flex; min-height:0; }
   main { flex:1; display:flex; flex-direction:column; align-items:center;
          justify-content:center; padding:24px; text-align:center; }
+  aside { width:280px; background:var(--panel); border-left:1px solid var(--panel2);
+          padding:14px; overflow-y:auto; display:none; }
+  aside h3 { font-size:13px; text-transform:uppercase; letter-spacing:1px;
+             color:var(--dim); margin-bottom:10px; }
+  aside h3 b { color:var(--accent); }
+  .today-item { background:var(--panel2); border-radius:8px; padding:8px 10px;
+                margin-bottom:8px; text-align:left; font-size:13px; }
+  .today-item .sn { font-family:ui-monospace,monospace; font-size:15px; font-weight:700; }
+  .today-item .meta { color:var(--dim); font-size:11px; margin-top:2px; }
+  .today-item.mine { border-left:3px solid var(--ok); }
+  .today-item.new { animation: flashok .9s; }
   .step-label { font-size:15px; letter-spacing:2px; color:var(--accent);
                 text-transform:uppercase; margin-bottom:12px; }
   .prompt { font-size:44px; font-weight:700; margin-bottom:10px; line-height:1.2; }
@@ -61,10 +73,16 @@
   <div class="timer" id="timer"></div>
 </header>
 
-<main id="main"></main>
+<div id="wrap">
+  <main id="main"></main>
+  <aside id="sidebar">
+    <h3>Scanned today: <b id="todayCount">0</b></h3>
+    <div id="todayList"></div>
+  </aside>
+</div>
 
 <footer>
-  <div id="recent"></div>
+  <div></div>
   <div>Scan <b>CMD-CANCEL</b> restart kit · <b>CMD-CUSTOMER</b> change customer · <b>CMD-LOGOUT</b> log out</div>
 </footer>
 
@@ -181,6 +199,7 @@
   function showLogin(note) {
     state = 'login'; token = null; user = null; currentCustomer = null; kit = {};
     $('who').textContent = ''; $('timer').textContent = '';
+    $('sidebar').style.display = 'none'; lastTopId = null;
     $('main').innerHTML = `
       <div class="step-label">Log in</div>
       <div class="prompt">Scan your badge or enter your user code</div>
@@ -278,6 +297,19 @@
     });
   }
 
+  function showDuplicateConfirm(pendingSerial, dup) {
+    state = 'serial_confirm';
+    kit._pending_serial = pendingSerial;
+    render({
+      step: 'Verify serial',
+      prompt: '⚠ Already received',
+      hint: `Serial ${pendingSerial} was already recorded on ${dup.received_at} UTC by ${dup.operator}. This kit may have been scanned before.`,
+      choices: [{ label: 'Record again anyway (CMD-OVERRIDE)', value: 'CMD-OVERRIDE' }],
+      msg: 'Set this kit aside if it was already processed — or scan the correct serial, or scan/tap OVERRIDE to record it again.',
+      msgClass: 'warn',
+    });
+  }
+
   // ---------- scan router ----------
   async function handleScan(raw) {
     lastActivity = Date.now();
@@ -328,22 +360,22 @@
 
     if (state === 'serial') {
       if (c.type !== 'DATA') return showMsg('Expecting the kit serial number barcode.', 'err');
-      const res = await api('/api/validate/serial', { body: { scan: raw, customer_id: currentCustomer.id } });
-      if (res.ok) return saveKit(raw, false);
-      if (res.flagged) return showSerialConfirm(raw, res.message);
-      return showMsg(res.message, 'err');
+      return handleSerialScan(raw);
     }
 
     if (state === 'serial_confirm') {
       if (c.type === 'CMD' && c.value === CMD.OVERRIDE) return saveKit(kit._pending_serial, true);
-      if (c.type === 'DATA') {
-        const res = await api('/api/validate/serial', { body: { scan: raw, customer_id: currentCustomer.id } });
-        if (res.ok) return saveKit(raw, false);
-        if (res.flagged) return showSerialConfirm(raw, res.message);
-        return showMsg(res.message, 'err');
-      }
+      if (c.type === 'DATA') return handleSerialScan(raw);
       return showMsg('Re-scan the serial, or scan OVERRIDE to accept.', 'err');
     }
+  }
+
+  async function handleSerialScan(raw) {
+    const res = await api('/api/validate/serial', { body: { scan: raw, customer_id: currentCustomer.id } });
+    if (res.ok && res.duplicate) return showDuplicateConfirm(raw, res.duplicate);
+    if (res.ok) return saveKit(raw, false);
+    if (res.flagged) return showSerialConfirm(raw, res.message);
+    return showMsg(res.message, 'err');
   }
 
   async function saveKit(serial, flagged) {
@@ -361,10 +393,21 @@
     showReturnTracking(true);   // loop: same customer, next kit
   }
 
+  let lastTopId = null;
   async function loadRecent() {
     try {
-      const rows = await api('/api/returns/recent');
-      $('recent').innerHTML = rows.map(r => `<span>${r.serial} · ${r.customer_name}</span>`).join('');
+      const rows = await api('/api/returns/today');
+      $('sidebar').style.display = 'block';
+      $('todayCount').textContent = rows.length;
+      $('todayList').innerHTML = rows.map((r, i) => {
+        const time = r.received_at.slice(11, 16);
+        const isNew = i === 0 && r.id !== lastTopId && lastTopId !== null;
+        return `<div class="today-item ${r.user_id === user.id ? 'mine' : ''} ${isNew ? 'new' : ''}">
+          <div class="sn">${r.serial}</div>
+          <div class="meta">${r.customer_name} · ${time} UTC · ${r.operator}</div>
+        </div>`;
+      }).join('');
+      if (rows.length) lastTopId = rows[0].id;
     } catch { /* ignore */ }
   }
 

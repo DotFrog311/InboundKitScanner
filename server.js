@@ -83,7 +83,18 @@ app.post('/api/validate/serial', auth, (req, res) => {
   const { scan, customer_id } = req.body || {};
   const customer = db.prepare('SELECT * FROM customers WHERE id=?').get(customer_id);
   if (!customer) return res.status(400).json({ ok: false, message: 'Select a customer first.' });
-  res.json(checkSerial(scan, customer));
+  const result = checkSerial(scan, customer);
+  if (result.ok) {
+    // Duplicate check: this serial was already received (kits are destroyed, so
+    // the same serial should never legitimately arrive twice).
+    const dup = db.prepare(`
+      SELECT r.received_at, u.name AS operator FROM returns r
+      JOIN users u ON u.id = r.user_id
+      WHERE r.serial = ? AND r.customer_id = ? ORDER BY r.id DESC LIMIT 1`)
+      .get(String(scan).trim(), customer.id);
+    if (dup) result.duplicate = dup;
+  }
+  res.json(result);
 });
 
 // ---------- record a completed return ----------
@@ -121,6 +132,15 @@ app.get('/api/returns/recent', auth, (req, res) => {
     SELECT r.id, r.serial, r.return_tracking, r.received_at, c.name AS customer_name, rs.label AS reason_label
     FROM returns r JOIN customers c ON c.id=r.customer_id JOIN reasons rs ON rs.id=r.reason_id
     WHERE r.user_id = ? ORDER BY r.id DESC LIMIT 10`).all(req.user.id));
+});
+
+// Everything received today (Pacific), all operators — sidebar "already scanned" list.
+app.get('/api/returns/today', auth, (req, res) => {
+  const { start, end } = reports.pacificDayBounds(0);
+  res.json(db.prepare(`
+    SELECT r.id, r.serial, r.received_at, c.name AS customer_name, u.name AS operator, u.id AS user_id
+    FROM returns r JOIN customers c ON c.id=r.customer_id JOIN users u ON u.id=r.user_id
+    WHERE r.received_at BETWEEN ? AND ? ORDER BY r.id DESC`).all(start, end));
 });
 
 // ---------- admin: CRUD ----------
