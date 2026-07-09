@@ -51,7 +51,10 @@
   .scan-echo { font-family:ui-monospace,monospace; color:var(--dim); font-size:14px;
                min-height:20px; margin-top:16px; }
   footer { padding:10px 24px; background:var(--panel); font-size:13px; color:var(--dim);
-           display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+           display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; }
+  .fbtn { background:var(--panel2); color:var(--text); border:1px solid #475569;
+          border-radius:8px; padding:9px 16px; font-size:14px; cursor:pointer; margin-right:8px; }
+  .fbtn:hover { border-color:var(--accent); }
   #recent { display:flex; gap:10px; overflow-x:auto; }
   #recent span { white-space:nowrap; background:var(--panel2); border-radius:6px; padding:3px 8px; }
   #scanbox { position:absolute; opacity:0; pointer-events:none; }
@@ -82,8 +85,12 @@
 </div>
 
 <footer>
-  <div></div>
-  <div>Scan <b>CMD-CANCEL</b> restart kit · <b>CMD-CUSTOMER</b> change customer · <b>CMD-LOGOUT</b> log out</div>
+  <div id="footerBtns" style="display:none">
+    <button class="fbtn" data-cmd="CMD-CUSTOMER">⇄ Change customer</button>
+    <button class="fbtn" data-cmd="CMD-CANCEL">↺ Restart this kit</button>
+    <button class="fbtn" data-cmd="CMD-LOGOUT">⎋ Log out</button>
+  </div>
+  <div>These also work as scannable barcodes — print the sheet from the Admin page</div>
 </footer>
 
 <input id="scanbox" autocomplete="off">
@@ -200,6 +207,7 @@
     state = 'login'; token = null; user = null; currentCustomer = null; kit = {};
     $('who').textContent = ''; $('timer').textContent = '';
     $('sidebar').style.display = 'none'; lastTopId = null;
+    $('footerBtns').style.display = 'none';
     $('main').innerHTML = `
       <div class="step-label">Log in</div>
       <div class="prompt">Scan your badge or enter your user code</div>
@@ -219,6 +227,7 @@
       token = res.token; user = res.user; timeoutSec = res.timeout_seconds; lastActivity = Date.now();
       $('who').innerHTML = `Operator: <b>${user.name}</b>${user.is_admin ? ' · <a href="/admin.html" style="color:var(--accent)">Admin</a>' : ''}`;
       boot = await api('/api/bootstrap');
+      $('footerBtns').style.display = 'block';
       showCustomer();
     });
   }
@@ -415,6 +424,9 @@
     try { if (token) await api('/api/logout', { body: {} }); } catch { /* ignore */ }
     showLogin(note || '');
   }
+
+  document.querySelectorAll('.fbtn').forEach(b =>
+    b.addEventListener('click', () => handleScan(b.dataset.cmd)));
 
   showLogin('');
 })();
