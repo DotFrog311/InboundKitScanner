@@ -216,7 +216,12 @@
         <input id="ucode" placeholder="User code" autofocus autocomplete="off">
         <input id="upin" placeholder="PIN (if required)" type="password" autocomplete="off">
         <button type="submit">Log in</button>
-      </form>`;
+      </form>
+      <div style="margin-top:22px;font-size:13px">
+        <a href="/admin.html" style="color:var(--dim)">Admin console</a>
+        <span style="color:var(--panel2)"> · </span>
+        <a href="/barcodes.html" style="color:var(--dim)">Barcode sheets</a>
+      </div>`;
     const form = $('loginForm');
     $('ucode').focus();
     // A badge scan (USR-xxxx + Enter) submits immediately from the code field.
