@@ -88,11 +88,29 @@
   setInterval(refocus, 800);
   scanbox.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
+      clearTimeout(digitTimer);
       const v = scanbox.value.trim();
       scanbox.value = '';
       if (v) handleScan(v);
       e.preventDefault();
     }
+  });
+
+  // At the reason step, a lone number-pad press selects that reason without Enter.
+  // A scanner streams characters within milliseconds, so if the input is still a
+  // single digit 250ms later, it was a human keypress — not the start of a barcode.
+  let digitTimer = null;
+  scanbox.addEventListener('input', () => {
+    clearTimeout(digitTimer);
+    if (state !== 'reason') return;
+    const v = scanbox.value.trim();
+    if (!/^[1-9]$/.test(v)) return;
+    digitTimer = setTimeout(() => {
+      if (state === 'reason' && scanbox.value.trim() === v) {
+        scanbox.value = '';
+        selectReasonByNumber(parseInt(v, 10));
+      }
+    }, 250);
   });
 
   // ---------- inactivity auto-logout ----------
@@ -224,9 +242,15 @@
     render({
       step: 'Step 4 of 5',
       prompt: 'Why was it returned?',
-      hint: 'Scan a reason barcode from your printed sheet, or tap a button.',
-      choices: boot.reasons.map(r => ({ label: r.label, value: 'RSN-' + r.code })),
+      hint: 'Press the number key, scan a reason barcode, or tap a button.',
+      choices: boot.reasons.map((r, i) => ({ label: `${i + 1}. ${r.label}`, value: 'RSN-' + r.code })),
     });
+  }
+  function selectReasonByNumber(n) {
+    const reason = boot.reasons[n - 1];
+    if (!reason) return showMsg(`No reason #${n}.`, 'err');
+    kit.reason_id = reason.id; kit.reason_label = reason.label;
+    showSerial();
   }
 
   function showSerial() {
@@ -294,7 +318,8 @@
     }
 
     if (state === 'reason') {
-      if (c.type !== 'RSN') return showMsg('Scan a REASON barcode from the printed sheet (or tap a button).', 'err');
+      if (c.type === 'DATA' && /^[1-9]$/.test(c.value)) return selectReasonByNumber(parseInt(c.value, 10));
+      if (c.type !== 'RSN') return showMsg('Press a number key, or scan a REASON barcode from the printed sheet.', 'err');
       const reason = boot.reasons.find(r => r.code === c.value);
       if (!reason) return showMsg(`Unknown reason code "${c.value}".`, 'err');
       kit.reason_id = reason.id; kit.reason_label = reason.label;
