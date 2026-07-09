@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Barcode Sheets — Returns Receiving</title>
+<script src="/vendor/jsbarcode.js"></script>
+<style>
+  * { box-sizing:border-box; margin:0; font-family:system-ui,sans-serif; }
+  body { padding:24px; color:#0f172a; }
+  h1 { font-size:22px; margin-bottom:4px; }
+  .note { color:#64748b; font-size:13px; margin-bottom:16px; }
+  #loginCard { max-width:340px; display:flex; flex-direction:column; gap:10px; margin-top:24px; }
+  #loginCard input { padding:10px; border:1px solid #e2e8f0; border-radius:8px; font-size:15px; }
+  #loginCard button { padding:10px; border:0; border-radius:8px; background:#0284c7; color:#fff; font-size:15px; cursor:pointer; }
+  .err { color:#dc2626; min-height:18px; font-size:14px; }
+  h2 { font-size:18px; margin:26px 0 10px; border-bottom:2px solid #0f172a; padding-bottom:4px; page-break-before:auto; }
+  .grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:18px; }
+  .cell { border:1px dashed #cbd5e1; border-radius:8px; padding:10px; text-align:center; }
+  .cell .label { font-weight:700; font-size:15px; margin-bottom:4px; }
+  svg { max-width:100%; }
+  @media print {
+    .noprint { display:none; }
+    .cell { break-inside:avoid; }
+  }
+  .printbar { margin:16px 0; }
+  .printbar button { padding:10px 22px; border:0; border-radius:8px; background:#0f172a; color:#fff; font-size:15px; cursor:pointer; }
+</style>
+</head>
+<body>
+<h1>Printable Barcode Sheets</h1>
+<div class="note">Code128 barcodes for customers, return reasons, operator badges, and command codes. Print and post at the receiving station.</div>
+
+<div id="loginCard" class="noprint">
+  <b>Admin login required</b>
+  <input id="lc" placeholder="Admin user code">
+  <input id="lp" placeholder="PIN" type="password">
+  <div class="err" id="lerr"></div>
+  <button onclick="login()">Load barcode sheets</button>
+</div>
+
+<div id="sheets" style="display:none">
+  <div class="printbar noprint"><button onclick="window.print()">🖨 Print</button></div>
+  <h2>Customers (Step 1)</h2><div class="grid" id="gCust"></div>
+  <h2>Return Reasons (Step 4)</h2><div class="grid" id="gRsn"></div>
+  <h2>Commands</h2><div class="grid" id="gCmd"></div>
+  <h2>Operator Badges</h2><div class="grid" id="gUsr"></div>
+</div>
+
+<script>
+let token = null;
+async function api(path) {
+  const r = await fetch(path, { headers: { 'X-Session-Token': token } });
+  return r.json();
+}
+function cell(grid, label, code) {
+  const id = 'bc' + Math.random().toString(36).slice(2);
+  grid.insertAdjacentHTML('beforeend',
+    `<div class="cell"><div class="label">${label}</div><svg id="${id}"></svg></div>`);
+  JsBarcode('#' + id, code, { format:'CODE128', height:56, fontSize:13, margin:4 });
+}
+async function login() {
+  const r = await fetch('/api/login', {
+    method:'POST', headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ code: lc.value, pin: lp.value }) });
+  const res = await r.json();
+  if (res.error) { lerr.textContent = res.error; return; }
+  if (!res.user.is_admin) { lerr.textContent = 'Admin access required.'; return; }
+  token = res.token;
+  loginCard.style.display = 'none'; sheets.style.display = 'block';
+
+  const customers = await api('/api/admin/customers');
+  customers.filter(c => c.active).forEach(c => cell(gCust, c.name, 'CUST-' + c.code));
+
+  const reasons = await api('/api/admin/reasons');
+  reasons.filter(r2 => r2.active).forEach(r2 => cell(gRsn, r2.label, 'RSN-' + r2.code));
+
+  [['Same as return tracking','CMD-SAME'], ['Cancel / restart kit','CMD-CANCEL'],
+   ['Change customer','CMD-CUSTOMER'], ['Override serial check','CMD-OVERRIDE'],
+   ['Log out','CMD-LOGOUT']].forEach(([l, c]) => cell(gCmd, l, c));
+
+  const users = await api('/api/admin/users');
+  users.filter(u => u.active).forEach(u => cell(gUsr, u.name, 'USR-' + u.code));
+}
+</script>
+</body>
+</html>

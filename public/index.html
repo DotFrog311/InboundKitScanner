@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kit Returns Receiving</title>
+<style>
+  :root {
+    --bg:#0f172a; --panel:#1e293b; --panel2:#334155; --text:#f1f5f9; --dim:#94a3b8;
+    --accent:#38bdf8; --ok:#4ade80; --warn:#fbbf24; --err:#f87171;
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,sans-serif;
+         min-height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; justify-content:space-between; align-items:center;
+           padding:12px 24px; background:var(--panel); font-size:15px; }
+  header .who { color:var(--dim); }
+  header .who b { color:var(--text); }
+  main { flex:1; display:flex; flex-direction:column; align-items:center;
+         justify-content:center; padding:24px; text-align:center; }
+  .step-label { font-size:15px; letter-spacing:2px; color:var(--accent);
+                text-transform:uppercase; margin-bottom:12px; }
+  .prompt { font-size:44px; font-weight:700; margin-bottom:10px; line-height:1.2; }
+  .hint { color:var(--dim); font-size:17px; margin-bottom:24px; max-width:640px; }
+  .msg { min-height:64px; max-width:720px; font-size:19px; padding:14px 20px;
+         border-radius:10px; margin-bottom:20px; display:none; }
+  .msg.err { display:block; background:#7f1d1d; color:#fecaca; }
+  .msg.warn { display:block; background:#78350f; color:#fde68a; }
+  .msg.ok { display:block; background:#14532d; color:#bbf7d0; }
+  .captured { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; margin-bottom:16px; }
+  .chip { background:var(--panel); border:1px solid var(--panel2); border-radius:8px;
+          padding:8px 14px; font-size:14px; }
+  .chip .k { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1px; display:block; }
+  .chip.pending { opacity:.35; }
+  .choices { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; max-width:900px; }
+  .choices button { background:var(--panel); color:var(--text); border:2px solid var(--panel2);
+          border-radius:12px; padding:18px 26px; font-size:20px; cursor:pointer; }
+  .choices button:hover { border-color:var(--accent); }
+  .scan-echo { font-family:ui-monospace,monospace; color:var(--dim); font-size:14px;
+               min-height:20px; margin-top:16px; }
+  footer { padding:10px 24px; background:var(--panel); font-size:13px; color:var(--dim);
+           display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  #recent { display:flex; gap:10px; overflow-x:auto; }
+  #recent span { white-space:nowrap; background:var(--panel2); border-radius:6px; padding:3px 8px; }
+  #scanbox { position:absolute; opacity:0; pointer-events:none; }
+  .login-form { display:flex; flex-direction:column; gap:14px; align-items:center; }
+  .login-form input { font-size:26px; padding:12px 16px; border-radius:10px; border:2px solid var(--panel2);
+          background:var(--panel); color:var(--text); text-align:center; width:280px; }
+  .login-form input:focus { border-color:var(--accent); outline:none; }
+  .login-form button { font-size:20px; padding:12px 40px; border-radius:10px; border:0;
+          background:var(--accent); color:#082f49; font-weight:700; cursor:pointer; }
+  .timer { color:var(--dim); }
+  .flash-ok { animation: flashok .8s; }
+  @keyframes flashok { 0% { background:#14532d; } 100% { background:var(--bg); } }
+</style>
+</head>
+<body>
+<header>
+  <div><b>Kit Returns Receiving</b></div>
+  <div class="who" id="who"></div>
+  <div class="timer" id="timer"></div>
+</header>
+
+<main id="main"></main>
+
+<footer>
+  <div id="recent"></div>
+  <div>Scan <b>CMD-CANCEL</b> restart kit · <b>CMD-CUSTOMER</b> change customer · <b>CMD-LOGOUT</b> log out</div>
+</footer>
+
+<input id="scanbox" autocomplete="off">
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const CMD = { SAME:'SAME', CANCEL:'CANCEL', CUSTOMER:'CUSTOMER', OVERRIDE:'OVERRIDE', LOGOUT:'LOGOUT' };
+
+  let token = null, user = null, boot = null, timeoutSec = 180;
+  let lastActivity = Date.now();
+  let state = 'login';
+  let kit = {};                 // current kit in progress
+  let currentCustomer = null;   // sticky between kits
+
+  // ---------- scanner capture: hidden input keeps focus; Enter terminates a scan ----------
+  const scanbox = $('scanbox');
+  function refocus() { if (state !== 'login') scanbox.focus(); }
+  document.addEventListener('click', refocus);
+  setInterval(refocus, 800);
+  scanbox.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const v = scanbox.value.trim();
+      scanbox.value = '';
+      if (v) handleScan(v);
+      e.preventDefault();
+    }
+  });
+
+  // ---------- inactivity auto-logout ----------
+  ['keydown','mousedown','mousemove'].forEach(ev =>
+    document.addEventListener(ev, () => { lastActivity = Date.now(); }));
+  setInterval(() => {
+    if (state === 'login') return;
+    const left = timeoutSec - Math.floor((Date.now() - lastActivity) / 1000);
+    $('timer').textContent = left > 0 ? `auto-logout in ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}` : '';
+    if (left <= 0) doLogout('Logged out due to inactivity.');
+  }, 1000);
+
+  async function api(path, opts = {}) {
+    const r = await fetch(path, {
+      method: opts.method || (opts.body ? 'POST' : 'GET'),
+      headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Session-Token': token } : {}) },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    if (r.status === 401 && state !== 'login') { doLogout('Session expired. Please log in again.'); throw new Error('expired'); }
+    return r.json();
+  }
+
+  function classify(v) {
+    for (const p of ['CMD-','CUST-','RSN-','USR-']) {
+      if (v.toUpperCase().startsWith(p)) return { type: p.slice(0,-1), value: v.slice(p.length) };
+    }
+    return { type: 'DATA', value: v };
+  }
+
+  // ---------- rendering ----------
+  function render(opts) {
+    const { step, prompt, hint, choices, msg, msgClass } = opts;
+    let html = '';
+    if (step) html += `<div class="step-label">${step}</div>`;
+    html += `<div class="prompt">${prompt}</div>`;
+    if (hint) html += `<div class="hint">${hint}</div>`;
+    html += `<div class="msg ${msgClass||''}" id="msg">${msg||''}</div>`;
+    html += capturedChips();
+    if (choices) {
+      html += '<div class="choices">' + choices.map(c =>
+        `<button data-val="${c.value}">${c.label}</button>`).join('') + '</div>';
+    }
+    html += `<div class="scan-echo" id="echo"></div>`;
+    $('main').innerHTML = html;
+    document.querySelectorAll('.choices button').forEach(b =>
+      b.addEventListener('click', () => handleScan(b.dataset.val)));
+    refocus();
+  }
+  function chip(k, v) {
+    return `<div class="chip ${v?'':'pending'}"><span class="k">${k}</span>${v||'—'}</div>`;
+  }
+  function capturedChips() {
+    if (state === 'login' || state === 'customer') return '';
+    return `<div class="captured">
+      ${chip('Customer', currentCustomer && currentCustomer.name)}
+      ${chip('Return tracking', kit.return_tracking)}
+      ${chip('Outbound tracking', kit.outbound_tracking)}
+      ${chip('Reason', kit.reason_label)}
+      ${chip('Serial', kit.serial)}
+    </div>`;
+  }
+  function showMsg(text, cls) {
+    const m = $('msg'); if (!m) return;
+    m.textContent = text; m.className = 'msg ' + cls;
+  }
+
+  // ---------- screens ----------
+  function showLogin(note) {
+    state = 'login'; token = null; user = null; currentCustomer = null; kit = {};
+    $('who').textContent = ''; $('timer').textContent = '';
+    $('main').innerHTML = `
+      <div class="step-label">Log in</div>
+      <div class="prompt">Scan your badge or enter your user code</div>
+      <div class="msg ${note?'warn':''}" id="msg">${note||''}</div>
+      <form class="login-form" id="loginForm">
+        <input id="ucode" placeholder="User code" autofocus autocomplete="off">
+        <input id="upin" placeholder="PIN (if required)" type="password" autocomplete="off">
+        <button type="submit">Log in</button>
+      </form>`;
+    const form = $('loginForm');
+    $('ucode').focus();
+    // A badge scan (USR-xxxx + Enter) submits immediately from the code field.
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const res = await api('/api/login', { body: { code: $('ucode').value, pin: $('upin').value } });
+      if (res.error) return showMsg(res.error, 'err');
+      token = res.token; user = res.user; timeoutSec = res.timeout_seconds; lastActivity = Date.now();
+      $('who').innerHTML = `Operator: <b>${user.name}</b>${user.is_admin ? ' · <a href="/admin.html" style="color:var(--accent)">Admin</a>' : ''}`;
+      boot = await api('/api/bootstrap');
+      showCustomer();
+    });
+  }
+
+  function showCustomer() {
+    state = 'customer'; kit = {};
+    render({
+      step: 'Step 1 of 5',
+      prompt: 'Who is the customer?',
+      hint: 'Scan the customer barcode from your printed sheet, or tap a button.',
+      choices: boot.customers.map(c => ({ label: c.name, value: 'CUST-' + c.code })),
+    });
+    loadRecent();
+  }
+
+  function showReturnTracking(justSaved) {
+    state = 'return_tracking';
+    kit = {};
+    render({
+      step: 'Step 2 of 5',
+      prompt: 'Scan the RETURN tracking barcode',
+      hint: `Receiving for ${currentCustomer.name}. This is the label the carrier used to send it back (topmost label).`,
+      msg: justSaved ? '✔ Return recorded. Next kit — scan the return tracking barcode.' : '',
+      msgClass: justSaved ? 'ok' : '',
+    });
+  }
+
+  function showOutboundTracking() {
+    state = 'outbound_tracking';
+    render({
+      step: 'Step 3 of 5',
+      prompt: 'Scan the ORIGINAL outbound shipping barcode',
+      hint: 'Peel back or find the original label we shipped with. If it is the same label, scan it again or scan CMD-SAME.',
+      choices: [{ label: 'Same as return tracking (CMD-SAME)', value: 'CMD-SAME' }],
+    });
+  }
+
+  function showReason() {
+    state = 'reason';
+    render({
+      step: 'Step 4 of 5',
+      prompt: 'Why was it returned?',
+      hint: 'Scan a reason barcode from your printed sheet, or tap a button.',
+      choices: boot.reasons.map(r => ({ label: r.label, value: 'RSN-' + r.code })),
+    });
+  }
+
+  function showSerial() {
+    state = 'serial';
+    const cust = boot.customers.find(c => c.id === currentCustomer.id);
+    render({
+      step: 'Step 5 of 5',
+      prompt: 'Scan the kit SERIAL NUMBER',
+      hint: (cust && cust.serial_hint)
+        ? `Expected ${currentCustomer.name} format: ${cust.serial_hint}. Careful — the panel may also show part number and lot number barcodes.`
+        : 'Careful — the panel may also show part number and lot number barcodes.',
+    });
+  }
+
+  function showSerialConfirm(pendingSerial, message) {
+    state = 'serial_confirm';
+    kit._pending_serial = pendingSerial;
+    render({
+      step: 'Verify serial',
+      prompt: '⚠ Serial format mismatch',
+      hint: message,
+      choices: [{ label: 'Accept anyway (CMD-OVERRIDE)', value: 'CMD-OVERRIDE' }],
+      msg: 'Re-scan the correct serial barcode, or scan/tap OVERRIDE to accept it as-is.',
+      msgClass: 'warn',
+    });
+  }
+
+  // ---------- scan router ----------
+  async function handleScan(raw) {
+    lastActivity = Date.now();
+    const echo = $('echo'); if (echo) echo.textContent = 'last scan: ' + raw;
+    const c = classify(raw);
+
+    // Global commands
+    if (c.type === 'CMD') {
+      if (c.value === CMD.LOGOUT) return doLogout();
+      if (c.value === CMD.CANCEL && state !== 'customer') return showReturnTracking(false);
+      if (c.value === CMD.CUSTOMER) return showCustomer();
+    }
+
+    if (state === 'customer') {
+      if (c.type !== 'CUST') return showMsg('Scan a CUSTOMER barcode from the printed sheet (or tap a button).', 'err');
+      const cust = boot.customers.find(x => x.code === c.value);
+      if (!cust) return showMsg(`Unknown customer code "${c.value}".`, 'err');
+      currentCustomer = cust;
+      return showReturnTracking(false);
+    }
+
+    if (state === 'return_tracking' || state === 'outbound_tracking') {
+      if (state === 'outbound_tracking' && c.type === 'CMD' && c.value === CMD.SAME) {
+        kit.outbound_tracking = kit.return_tracking;
+        kit.outbound_tracking_raw = kit.return_tracking_raw;
+        return showReason();
+      }
+      if (c.type !== 'DATA') return showMsg('Expecting a tracking barcode here.', 'err');
+      const res = await api('/api/validate/tracking', { body: { scan: raw, customer_id: currentCustomer.id } });
+      if (!res.ok) return showMsg(res.message, 'err');
+      if (state === 'return_tracking') {
+        kit.return_tracking = res.normalized; kit.return_tracking_raw = raw;
+        return showOutboundTracking();
+      } else {
+        kit.outbound_tracking = res.normalized; kit.outbound_tracking_raw = raw;
+        return showReason();
+      }
+    }
+
+    if (state === 'reason') {
+      if (c.type !== 'RSN') return showMsg('Scan a REASON barcode from the printed sheet (or tap a button).', 'err');
+      const reason = boot.reasons.find(r => r.code === c.value);
+      if (!reason) return showMsg(`Unknown reason code "${c.value}".`, 'err');
+      kit.reason_id = reason.id; kit.reason_label = reason.label;
+      return showSerial();
+    }
+
+    if (state === 'serial') {
+      if (c.type !== 'DATA') return showMsg('Expecting the kit serial number barcode.', 'err');
+      const res = await api('/api/validate/serial', { body: { scan: raw, customer_id: currentCustomer.id } });
+      if (res.ok) return saveKit(raw, false);
+      if (res.flagged) return showSerialConfirm(raw, res.message);
+      return showMsg(res.message, 'err');
+    }
+
+    if (state === 'serial_confirm') {
+      if (c.type === 'CMD' && c.value === CMD.OVERRIDE) return saveKit(kit._pending_serial, true);
+      if (c.type === 'DATA') {
+        const res = await api('/api/validate/serial', { body: { scan: raw, customer_id: currentCustomer.id } });
+        if (res.ok) return saveKit(raw, false);
+        if (res.flagged) return showSerialConfirm(raw, res.message);
+        return showMsg(res.message, 'err');
+      }
+      return showMsg('Re-scan the serial, or scan OVERRIDE to accept.', 'err');
+    }
+  }
+
+  async function saveKit(serial, flagged) {
+    kit.serial = serial;
+    const res = await api('/api/returns', { body: {
+      customer_id: currentCustomer.id,
+      return_tracking: kit.return_tracking, return_tracking_raw: kit.return_tracking_raw,
+      outbound_tracking: kit.outbound_tracking, outbound_tracking_raw: kit.outbound_tracking_raw,
+      reason_id: kit.reason_id, serial, serial_flagged: flagged,
+    }});
+    if (res.error) return showMsg(res.error, 'err');
+    document.body.classList.remove('flash-ok'); void document.body.offsetWidth;
+    document.body.classList.add('flash-ok');
+    loadRecent();
+    showReturnTracking(true);   // loop: same customer, next kit
+  }
+
+  async function loadRecent() {
+    try {
+      const rows = await api('/api/returns/recent');
+      $('recent').innerHTML = rows.map(r => `<span>${r.serial} · ${r.customer_name}</span>`).join('');
+    } catch { /* ignore */ }
+  }
+
+  async function doLogout(note) {
+    try { if (token) await api('/api/logout', { body: {} }); } catch { /* ignore */ }
+    showLogin(note || '');
+  }
+
+  showLogin('');
+})();
+</script>
+</body>
+</html>

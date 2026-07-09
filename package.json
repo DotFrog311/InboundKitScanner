@@ -1,0 +1,23 @@
+{
+  "name": "kit-returns-receiving",
+  "version": "0.1.0",
+  "description": "Warehouse returns receiving app for wellness test kits — scan-driven intake, per-customer validation, scheduled customer email reports, monthly billing rollup.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node test/smoke.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsbarcode": "^3.11.6",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.14"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Returns Admin</title>
+<style>
+  :root { --bg:#f8fafc; --panel:#fff; --line:#e2e8f0; --text:#0f172a; --dim:#64748b; --accent:#0284c7; }
+  * { box-sizing:border-box; margin:0; font-family:system-ui,sans-serif; }
+  body { background:var(--bg); color:var(--text); }
+  header { background:#0f172a; color:#fff; padding:12px 24px; display:flex; justify-content:space-between; align-items:center; }
+  header a { color:#7dd3fc; text-decoration:none; margin-left:16px; }
+  nav { display:flex; gap:4px; padding:12px 24px 0; flex-wrap:wrap; }
+  nav button { border:1px solid var(--line); background:var(--panel); padding:8px 18px; cursor:pointer;
+               border-radius:8px 8px 0 0; font-size:14px; }
+  nav button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  section { background:var(--panel); margin:0 24px 24px; border:1px solid var(--line); border-radius:0 8px 8px 8px; padding:20px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { border:1px solid var(--line); padding:6px 10px; text-align:left; }
+  th { background:#f1f5f9; }
+  td input, td select { width:100%; border:1px solid transparent; background:transparent; padding:4px; font-size:13px; }
+  td input:focus { border-color:var(--accent); background:#fff; outline:none; }
+  .bar { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+  .bar input, .bar select { padding:7px 10px; border:1px solid var(--line); border-radius:6px; font-size:14px; }
+  button.act { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:8px 16px; cursor:pointer; font-size:14px; }
+  button.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); border-radius:6px; padding:8px 16px; cursor:pointer; font-size:14px; }
+  .note { color:var(--dim); font-size:13px; margin:8px 0; }
+  #loginCard { max-width:360px; margin:80px auto; background:var(--panel); border:1px solid var(--line);
+               border-radius:12px; padding:28px; display:flex; flex-direction:column; gap:12px; }
+  #loginCard input { padding:10px; border:1px solid var(--line); border-radius:8px; font-size:16px; }
+  .err { color:#dc2626; font-size:14px; min-height:18px; }
+  pre.preview { background:#f1f5f9; padding:12px; border-radius:8px; overflow:auto; max-height:400px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <b>Returns Admin</b>
+  <div><a href="/">Operator Station</a><a href="/barcodes.html" target="_blank">Print Barcode Sheets</a></div>
+</header>
+
+<div id="loginCard">
+  <b>Admin login</b>
+  <input id="lc" placeholder="Admin user code">
+  <input id="lp" placeholder="PIN" type="password">
+  <div class="err" id="lerr"></div>
+  <button class="act" onclick="login()">Log in</button>
+</div>
+
+<div id="app" style="display:none">
+  <nav id="tabs"></nav>
+  <section id="content"></section>
+</div>
+
+<script>
+let token = null;
+const TABS = ['Customers','Users','Reasons','Tracking Rules','Records','Reports','Settings'];
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    method: opts.method || (opts.body ? 'POST' : 'GET'),
+    headers: { 'Content-Type':'application/json', ...(token ? { 'X-Session-Token': token } : {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (r.status === 401) { location.reload(); }
+  return r.json();
+}
+async function login() {
+  const res = await api('/api/login', { body: { code: lc.value, pin: lp.value } });
+  if (res.error) { lerr.textContent = res.error; return; }
+  if (!res.user.is_admin) { lerr.textContent = 'This user is not an admin.'; return; }
+  token = res.token;
+  loginCard.style.display = 'none'; app.style.display = 'block';
+  tabs.innerHTML = TABS.map(t => `<button onclick="show('${t}')" id="tab-${t.replace(' ','_')}">${t}</button>`).join('');
+  show('Customers');
+}
+function setTab(t) {
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('on'));
+  document.getElementById('tab-' + t.replace(' ','_')).classList.add('on');
+}
+
+// Generic editable table for CRUD endpoints
+async function crudTable(t, endpoint, cols, hints) {
+  setTab(t);
+  const rows = await api('/api/admin/' + endpoint);
+  const head = cols.map(c => `<th>${c}</th>`).join('');
+  const body = rows.map(r => `<tr data-id="${r.id}">` +
+    cols.map(c => `<td><input data-f="${c}" value="${String(r[c] ?? '').replace(/"/g,'&quot;')}"
+      onchange="saveCell('${endpoint}', ${r.id}, this)"></td>`).join('') + '</tr>').join('');
+  content.innerHTML = `
+    ${hints ? `<div class="note">${hints}</div>` : ''}
+    <div class="bar"><button class="act" onclick="addRow('${endpoint}', '${t}')">+ Add row</button>
+    <span class="note">Edit any cell and press Tab/Enter — saves automatically. Set active=0 to retire a row.</span></div>
+    <table><tr>${head}</tr>${body}</table>
+    <div id="crudNew"></div>`;
+  window._cols = cols; window._tab = t;
+}
+async function saveCell(endpoint, id, input) {
+  const res = await api(`/api/admin/${endpoint}/${id}`, { method:'PUT', body: { [input.dataset.f]: input.value } });
+  if (res.error) alert(res.error);
+}
+async function addRow(endpoint, t) {
+  const vals = {};
+  for (const c of window._cols) {
+    if (c === 'id') continue;
+    const v = prompt(`New row — value for "${c}" (blank ok):`, '');
+    if (v === null) return;
+    if (v !== '') vals[c] = v;
+  }
+  const res = await api('/api/admin/' + endpoint, { body: vals });
+  if (res.error) { alert(res.error); return; }
+  show(t);
+}
+
+async function showRecords() {
+  setTab('Records');
+  const customers = await api('/api/admin/customers');
+  content.innerHTML = `
+    <div class="bar">
+      From <input type="date" id="rf"> To <input type="date" id="rt">
+      <select id="rc"><option value="">All customers</option>
+        ${customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}</select>
+      <button class="act" onclick="loadRecords()">Filter</button>
+      <button class="ghost" onclick="exportCsv()">Export all CSV</button>
+    </div>
+    <div id="rtable"></div>`;
+  loadRecords();
+}
+async function exportCsv() {
+  const r = await fetch('/api/admin/returns.csv', { headers: { 'X-Session-Token': token } });
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'returns_export.csv';
+  a.click();
+}
+async function loadRecords() {
+  const qs = new URLSearchParams();
+  if (rf.value) qs.set('from', rf.value);
+  if (rt.value) qs.set('to', rt.value);
+  if (rc.value) qs.set('customer_id', rc.value);
+  const rows = await api('/api/admin/returns?' + qs);
+  rtable.innerHTML = `<table><tr><th>Received (UTC)</th><th>Customer</th><th>Return Trk</th>
+    <th>Outbound Trk</th><th>Reason</th><th>Serial</th><th>Flag</th><th>Operator</th></tr>` +
+    rows.map(r => `<tr><td>${r.received_at}</td><td>${r.customer_name}</td><td>${r.return_tracking}</td>
+      <td>${r.outbound_tracking}</td><td>${r.reason_label}</td><td>${r.serial}</td>
+      <td>${r.serial_flagged ? '⚠ override' : ''}</td><td>${r.operator}</td></tr>`).join('') + '</table>';
+}
+
+async function showReports() {
+  setTab('Reports');
+  content.innerHTML = `
+    <div class="note">Reports run automatically (customer summaries at the configured hour Pacific; monthly billing on the 1st).
+    Use these buttons to preview (dry run) or send now.</div>
+    <div class="bar">
+      <button class="ghost" onclick="runSummary(true)">Preview today's customer summaries</button>
+      <button class="act" onclick="if(confirm('Send emails to all customers now?')) runSummary(false)">Send now</button>
+      <button class="ghost" onclick="runBilling(true)">Preview monthly billing</button>
+      <button class="act" onclick="if(confirm('Send billing email now?')) runBilling(false)">Send billing now</button>
+    </div>
+    <div id="rout"></div>
+    <h3 style="margin:18px 0 8px">Send log</h3><div id="rlog"></div>`;
+  const log = await api('/api/admin/report-log');
+  rlog.innerHTML = `<table><tr><th>When (UTC)</th><th>Type</th><th>Customer</th><th>Period</th><th>Count</th><th>Recipients</th><th>Status</th></tr>` +
+    log.map(l => `<tr><td>${l.sent_at}</td><td>${l.type}</td><td>${l.customer_name||'—'}</td>
+      <td>${l.period_start.slice(0,10)} → ${l.period_end.slice(0,10)}</td><td>${l.return_count}</td>
+      <td>${l.recipients||'—'}</td><td>${l.status}${l.error ? ' — '+l.error : ''}</td></tr>`).join('') + '</table>';
+}
+async function runSummary(dry) {
+  const res = await api('/api/admin/reports/customer-summary', { body: { dry_run: dry } });
+  rout.innerHTML = `<pre class="preview">${JSON.stringify(res.results.map(r =>
+    ({ customer:r.customer, count:r.count, recipients:r.recipients, status:r.status, subject:r.subject })), null, 2)}</pre>`;
+}
+async function runBilling(dry) {
+  const res = await api('/api/admin/reports/monthly-billing', { body: { dry_run: dry } });
+  rout.innerHTML = `<pre class="preview">${JSON.stringify({ period:res.label, total:res.total, perCustomer:res.rows, status:res.status }, null, 2)}</pre>`;
+}
+
+async function showSettings() {
+  setTab('Settings');
+  const s = await api('/api/admin/settings');
+  const fields = [
+    ['report_cadence', 'Report cadence: daily or weekly'],
+    ['report_hour_pt', 'Hour to send customer summaries (0–23, Pacific time; 20 = 8pm)'],
+    ['weekly_report_day', 'If weekly: day to send (0=Sun … 6=Sat)'],
+    ['session_timeout_seconds', 'Operator auto-logout after this many seconds idle'],
+    ['billing_email', 'Accounting email(s) for monthly billing report (comma-separated)'],
+    ['email_from_name', 'From name on outgoing emails'],
+  ];
+  content.innerHTML = `<table>` + fields.map(([k, label]) => `
+    <tr><td style="width:45%">${label}<br><span class="note">${k}</span></td>
+    <td><input id="set_${k}" value="${s[k] ?? ''}"></td></tr>`).join('') + `</table>
+    <div class="bar" style="margin-top:14px"><button class="act" onclick="saveSettings()">Save settings</button></div>
+    <div class="note">SMTP credentials (Gmail app password) are configured in the .env file on the server, not here.</div>`;
+  window._setkeys = fields.map(f => f[0]);
+}
+async function saveSettings() {
+  const body = {};
+  for (const k of window._setkeys) body[k] = document.getElementById('set_' + k).value;
+  await api('/api/admin/settings', { method:'PUT', body });
+  alert('Saved.');
+}
+
+function show(t) {
+  if (t === 'Customers') crudTable(t, 'customers', ['id','code','name','serial_regex','serial_hint','emails','active'],
+    'code = what the CUST- barcode encodes. serial_regex = expected serial format (e.g. ^J[A-Z0-9]{6,10}$). emails = comma-separated report recipients.');
+  else if (t === 'Users') crudTable(t, 'users', ['id','code','pin','name','is_admin','active'],
+    'code = badge / login code (print as USR-code barcode). Leave pin blank for scan-only login.');
+  else if (t === 'Reasons') crudTable(t, 'reasons', ['id','code','label','active'],
+    'code = what the RSN- barcode encodes. label = shown to operators and in customer emails.');
+  else if (t === 'Tracking Rules') crudTable(t, 'tracking_rules', ['id','priority','description','match_regex','action','param','active'],
+    'Rules normalize scanned tracking barcodes (lowest priority number wins). action: keep_last (param=N), strip_first (param=N), or regex_capture (group 1 of match_regex).');
+  else if (t === 'Records') showRecords();
+  else if (t === 'Reports') showReports();
+  else if (t === 'Settings') showSettings();
+}
+</script>
+</body>
+</html>
