@@ -95,7 +95,7 @@ setDefault.run('report_cadence', 'daily');          // 'daily' | 'weekly'
 setDefault.run('report_hour_pt', '20');             // 8pm Pacific
 setDefault.run('weekly_report_day', '5');           // Friday (0=Sun..6=Sat), used when cadence=weekly
 setDefault.run('session_timeout_seconds', '180');   // auto-logout after inactivity
-setDefault.run('billing_email', 'accounting@dotprinter.com');
+setDefault.run('billing_email', 'jeff@dotprinter.com');
 setDefault.run('email_from_name', 'Returns Receiving');
 
 const userCount = db.prepare('SELECT COUNT(*) c FROM users').get().c;
@@ -109,9 +109,9 @@ const custCount = db.prepare('SELECT COUNT(*) c FROM customers').get().c;
 if (custCount === 0) {
   const addCust = db.prepare(
     'INSERT INTO customers (code, name, serial_regex, serial_hint, emails) VALUES (?,?,?,?,?)');
-  // Sample customers — replace/edit in Admin. Junction example from spec.
-  addCust.run('JUNCTION', 'Junction', '^J[A-Z0-9]{6,10}$', 'Starts with J, 7–11 chars', '');
-  addCust.run('LABCORP', 'LabCorp', '^[0-9]{10}$', '10 digits, all numeric', '');
+  // Initial pilot customers (report emails point at Jeff's personal address for testing).
+  addCust.run('JUNCTION', 'Junction', '^J[A-Za-z0-9]+$', 'Starts with the letter J', 'jshattuck@gmail.com');
+  addCust.run('LABCORP', 'LabCorp On-Demand', '^[0-9]{12}$', '12 digits, numeric only', 'jshattuck@gmail.com');
 }
 
 const reasonCount = db.prepare('SELECT COUNT(*) c FROM reasons').get().c;
@@ -128,15 +128,18 @@ const ruleCount = db.prepare('SELECT COUNT(*) c FROM tracking_rules').get().c;
 if (ruleCount === 0) {
   const addRule = db.prepare(
     'INSERT INTO tracking_rules (priority, description, match_regex, action, param) VALUES (?,?,?,?,?)');
+  // USPS IMpb with 420+ZIP routing prefix: capture the trailing 22-digit
+  // tracking number (starts 92/93/94/95). Runs FIRST so it beats the generic
+  // digit-length FedEx rules. Verified against a real return scan:
+  // 42094105299400151969010882023570 -> 9400151969010882023570
+  addRule.run(5, 'USPS 420+ZIP prefix -> trailing 22-digit tracking',
+    '^420[0-9]{4,10}(9[2-5][0-9]{20})$', 'regex_capture', null);
   // FedEx Ground 96 barcodes are 34 digits; the tracking number is the last 12.
   addRule.run(10, 'FedEx 34-digit barcode -> last 12', '^[0-9]{34}$', 'keep_last', '12');
-  // FedEx Express 32-digit -> last 12
-  addRule.run(20, 'FedEx 32-digit barcode -> last 12', '^[0-9]{32}$', 'keep_last', '12');
+  // FedEx Express 32-digit -> last 12 (excluding USPS 420-prefixed scans)
+  addRule.run(20, 'FedEx 32-digit barcode -> last 12', '^(?!420)[0-9]{32}$', 'keep_last', '12');
   // Spec example: 25-digit scan -> remove first 10 routing characters.
   addRule.run(30, 'FedEx 25-digit barcode -> strip first 10', '^[0-9]{25}$', 'strip_first', '10');
-  // USPS IMpb with 420+ZIP prefix: capture the 9x… tracking portion.
-  addRule.run(40, 'USPS 420+ZIP prefix -> strip routing prefix',
-    '^420[0-9]{5}(9[2-5][0-9]{18,24})$', 'regex_capture', null);
 }
 
 module.exports = db;

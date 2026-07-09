@@ -45,8 +45,9 @@ function check(name, cond, extra) {
     check('FedEx 34-digit normalized to last 12', r.json.ok && r.json.normalized.length === 12, r.json);
     r = await req('/api/validate/tracking', { scan: '1234567890123456789012345', customer_id: junction.id });
     check('25-digit strips first 10', r.json.ok && r.json.normalized === '123456789012345', r.json);
-    r = await req('/api/validate/tracking', { scan: '420900779205512345678901234567', customer_id: junction.id });
-    check('USPS 420+ZIP prefix stripped', r.json.ok && r.json.normalized.startsWith('92'), r.json);
+    r = await req('/api/validate/tracking', { scan: '42094105299400151969010882023570', customer_id: junction.id });
+    check('real USPS return scan -> 22-digit tracking',
+      r.json.ok && r.json.normalized === '9400151969010882023570', r.json);
     r = await req('/api/validate/tracking', { scan: '1Z999AA10123456784', customer_id: junction.id });
     check('UPS 1Z accepted verbatim', r.json.ok && r.json.normalized === '1Z999AA10123456784', r.json);
     r = await req('/api/validate/tracking', { scan: 'J1234567', customer_id: junction.id });
@@ -59,6 +60,10 @@ function check(name, cond, extra) {
     check('valid Junction serial accepted', r.json.ok, r.json);
     r = await req('/api/validate/serial', { scan: 'J1234567', customer_id: labcorp.id });
     check('Junction serial under LabCorp flags mismatch', !r.json.ok && r.json.flagged, r.json);
+    r = await req('/api/validate/serial', { scan: '123456789012', customer_id: labcorp.id });
+    check('12-digit numeric LabCorp serial accepted', r.json.ok, r.json);
+    r = await req('/api/validate/serial', { scan: '12345678901', customer_id: labcorp.id });
+    check('11-digit serial under LabCorp flags mismatch', !r.json.ok && r.json.flagged, r.json);
     r = await req('/api/validate/serial', { scan: '9611020987654321043321987654321012', customer_id: junction.id });
     check('tracking barcode rejected in serial field', !r.json.ok && !r.json.flagged, r.json);
 
@@ -76,7 +81,7 @@ function check(name, cond, extra) {
     console.log('reports (dry run)');
     r = await req('/api/admin/reports/customer-summary', { dry_run: true });
     const jr = r.json.results.find(x => x.customer === 'Junction');
-    const lr = r.json.results.find(x => x.customer === 'LabCorp');
+    const lr = r.json.results.find(x => x.customer === 'LabCorp On-Demand');
     check('Junction summary has 1 return', jr && jr.count === 1, jr);
     check('LabCorp gets zero-return notice', lr && lr.count === 0 && /No kit returns/.test(lr.subject), lr);
     check('summary email contains serial', jr && /J1234567/.test(jr.html));
