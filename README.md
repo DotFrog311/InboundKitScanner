@@ -25,7 +25,7 @@ Boxes carry many barcodes (part number, lot number, routing codes). The app reje
 
 - **Customer summaries** — daily at 8pm Pacific (hour and daily/weekly cadence configurable in Admin → Settings). Each customer gets only their own data: return tracking, outbound tracking, reason, serial — in the body and as a CSV attachment. Customers with zero returns get a "no returns processed" notice. Recipients are a comma-separated list per customer.
 - **Monthly billing** — 1st of each month, previous month's per-customer counts, sent to accounting for invoicing.
-- Sending works via **Resend** (HTTPS API — set `RESEND_API_KEY` + `EMAIL_FROM`; required on Railway trial/hobby, which block SMTP ports) or **Gmail SMTP** (`SMTP_USER`/`SMTP_PASS`; needs Railway Pro or a host with open SMTP). With neither configured the app runs in **preview mode**: reports are generated and logged (Admin → Reports) but not sent.
+- Sending works via the **Gmail API** (HTTPS — set `GMAIL_CLIENT_ID`/`GMAIL_CLIENT_SECRET`/`GMAIL_REFRESH_TOKEN` + `EMAIL_FROM`; works on Railway trial/hobby, which block SMTP ports — setup walkthrough in `.env.example`), **Resend** (`RESEND_API_KEY`), or **Gmail SMTP** (`SMTP_USER`/`SMTP_PASS`; needs a host with open SMTP ports). With none configured the app runs in **preview mode**: reports are generated and logged (Admin → Reports) but not sent.
 
 ## Setup
 
