@@ -94,7 +94,8 @@ const setDefault = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUE
 setDefault.run('report_cadence', 'daily');          // 'daily' | 'weekly'
 setDefault.run('report_hour_pt', '20');             // 8pm Pacific
 setDefault.run('weekly_report_day', '5');           // Friday (0=Sun..6=Sat), used when cadence=weekly
-setDefault.run('session_timeout_seconds', '180');   // auto-logout after inactivity
+setDefault.run('session_timeout_seconds', '180');   // operator auto-logout after inactivity
+setDefault.run('admin_session_timeout_seconds', '3600'); // admins get a longer leash
 setDefault.run('billing_email', 'jeff@dotprinter.com');
 setDefault.run('email_from_name', 'Returns Receiving');
 

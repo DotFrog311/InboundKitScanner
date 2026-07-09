@@ -16,15 +16,16 @@ app.get('/vendor/jsbarcode.js', (req, res) =>
   res.sendFile(path.join(__dirname, 'node_modules/jsbarcode/dist/JsBarcode.all.min.js')));
 
 // ---------- sessions (in-memory, sliding inactivity timeout) ----------
-const sessions = new Map(); // token -> { userId, lastSeen }
-function timeoutMs() {
-  return parseInt(reports.getSetting('session_timeout_seconds') || '180', 10) * 1000;
+const sessions = new Map(); // token -> { userId, isAdmin, lastSeen }
+function timeoutMs(isAdmin) {
+  const key = isAdmin ? 'admin_session_timeout_seconds' : 'session_timeout_seconds';
+  return parseInt(reports.getSetting(key) || (isAdmin ? '3600' : '180'), 10) * 1000;
 }
 function auth(req, res, next) {
   const token = req.headers['x-session-token'];
   const s = token && sessions.get(token);
   if (!s) return res.status(401).json({ error: 'Not logged in.' });
-  if (Date.now() - s.lastSeen > timeoutMs()) {
+  if (Date.now() - s.lastSeen > timeoutMs(s.isAdmin)) {
     sessions.delete(token);
     return res.status(401).json({ error: 'Session expired due to inactivity. Please log in again.' });
   }
@@ -48,11 +49,11 @@ app.post('/api/login', (req, res) => {
   if (!user) return res.status(401).json({ error: 'Unknown user code.' });
   if (user.pin && user.pin !== String(pin || '')) return res.status(401).json({ error: 'Incorrect PIN.' });
   const token = crypto.randomBytes(24).toString('hex');
-  sessions.set(token, { userId: user.id, lastSeen: Date.now() });
+  sessions.set(token, { userId: user.id, isAdmin: !!user.is_admin, lastSeen: Date.now() });
   res.json({
     token,
     user: { id: user.id, name: user.name, code: user.code, is_admin: !!user.is_admin },
-    timeout_seconds: timeoutMs() / 1000,
+    timeout_seconds: timeoutMs(!!user.is_admin) / 1000,
   });
 });
 app.post('/api/logout', auth, (req, res) => {

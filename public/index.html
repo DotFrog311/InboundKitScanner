@@ -219,8 +219,6 @@
       </form>
       <div style="margin-top:22px;font-size:13px">
         <a href="/admin.html" style="color:var(--dim)">Admin console</a>
-        <span style="color:var(--panel2)"> · </span>
-        <a href="/barcodes.html" style="color:var(--dim)">Barcode sheets</a>
       </div>`;
     const form = $('loginForm');
     $('ucode').focus();
@@ -230,7 +228,9 @@
       const res = await api('/api/login', { body: { code: $('ucode').value, pin: $('upin').value } });
       if (res.error) return showMsg(res.error, 'err');
       token = res.token; user = res.user; timeoutSec = res.timeout_seconds; lastActivity = Date.now();
-      $('who').innerHTML = `Operator: <b>${user.name}</b>${user.is_admin ? ' · <a href="/admin.html" style="color:var(--accent)">Admin</a>' : ''}`;
+      $('who').innerHTML = `Operator: <b>${user.name}</b>` +
+        ' · <a href="/barcodes.html" target="_blank" style="color:var(--accent)">Barcode sheets</a>' +
+        (user.is_admin ? ' · <a href="/admin.html" style="color:var(--accent)">Admin</a>' : '');
       boot = await api('/api/bootstrap');
       $('footerBtns').style.display = 'block';
       showCustomer();
