@@ -42,6 +42,19 @@ First run seeds the database (`data/returns.db`) with:
 - Sample customers `JUNCTION` and `LABCORP` with example serial rules
 - Default reasons and tracking normalization rules
 
+## Deploying to Railway
+
+1. Sign up at railway.com (log in with GitHub).
+2. New Project → **Deploy from GitHub repo** → select `DotFrog311/InboundKitScanner`. Railway auto-detects Node and runs `npm start`.
+3. In the service: right-click (or Settings) → **Attach Volume**, mount path `/data` (1 GB is plenty).
+4. Under **Variables**, add:
+   - `DATA_DIR=/data` (so the SQLite database lives on the volume and survives deploys)
+   - `SMTP_USER` / `SMTP_PASS` (Gmail app password) when ready to send real emails — until then reports run in preview mode
+5. Settings → **Networking → Generate Domain** — that's the URL your team uses (https included).
+6. Every `git push` to `main` auto-deploys.
+
+**Important:** once the app is on a public URL, immediately change the ADMIN PIN (Admin → Users) and give operators PINs — the seeded ADMIN/0000 is public knowledge.
+
 ## Admin (`/admin.html`)
 
 Customers (codes, serial format regex + hint, report emails), Users (badge codes, PINs, admin flag), Reasons, Tracking Rules, Records (filter/export CSV), Reports (preview/dry-run or send now, send log), Settings (cadence, send hour, idle timeout, billing email).
