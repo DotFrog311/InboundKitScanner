@@ -63,6 +63,14 @@ app.get('/api/session', auth, (req, res) => {
   res.json({ user: { id: req.user.id, name: req.user.name, is_admin: !!req.user.is_admin } });
 });
 
+// Public data for the printable barcode sheets (no login required).
+app.get('/api/barcode-data', (req, res) => {
+  res.json({
+    customers: db.prepare('SELECT code, name FROM customers WHERE active=1 ORDER BY name').all(),
+    reasons: db.prepare('SELECT code, label FROM reasons WHERE active=1 ORDER BY id').all(),
+  });
+});
+
 // ---------- bootstrap data for the operator screen ----------
 app.get('/api/bootstrap', auth, (req, res) => {
   res.json({
