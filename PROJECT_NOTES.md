@@ -60,7 +60,8 @@ Full feature and architecture description: README.md.
 - [ ] Confirm Railway volume is truly mounted at `/data` (Railway agent once
       reported /data missing — if DATA_DIR and mount path mismatch, data is
       ephemeral and dies on redeploy)
-- [ ] Verify Gmail API send works end-to-end (Send log should show "sent")
+- [x] Verify Gmail API send works end-to-end — CONFIRMED 2026-07-09: manual
+      "Send now" and the scheduled 8pm PT run both delivered
 - [ ] Testing recipients: both customers email jshattuck@gmail.com; billing goes
       to jeff@dotprinter.com. Replace with real customer emails before go-live.
 - [ ] Only 2 of ~10 customers configured; add the rest with serial rules
