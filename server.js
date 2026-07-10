@@ -9,8 +9,26 @@ const db = require('./db');
 const { classifyScan, checkSerial, checkTracking } = require('./lib/validate');
 const reports = require('./lib/reports');
 
+// Crash hardening: log the cause instead of dying silently. Unhandled promise
+// rejections (Node 22 kills the process on these by default) are logged and
+// survived; truly unknown exceptions are logged with a stack then exit so the
+// host restarts us cleanly — either way the cause lands in the deploy logs.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.stack || err);
+  process.exit(1);
+});
+
 const app = express();
 app.use(express.json());
+
+// Wrapper so an error in an async route returns a 500 instead of killing the process.
+const ah = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(e => {
+  console.error('[route error]', req.method, req.path, e && e.stack || e);
+  if (!res.headersSent) res.status(500).json({ error: String(e && e.message || e) });
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/vendor/jsbarcode.js', (req, res) =>
   res.sendFile(path.join(__dirname, 'node_modules/jsbarcode/dist/JsBarcode.all.min.js')));
@@ -225,19 +243,19 @@ app.get('/api/admin/returns.csv', auth, adminOnly, (req, res) => {
 });
 
 // ---------- admin: reports ----------
-app.post('/api/admin/reports/customer-summary', auth, adminOnly, async (req, res) => {
+app.post('/api/admin/reports/customer-summary', auth, adminOnly, ah(async (req, res) => {
   const { dry_run = true, days_back = 0 } = req.body || {};
   const { start, end, label } = reports.pacificDayBounds(days_back);
   const results = await reports.sendCustomerSummaries({
     periodStart: start, periodEnd: end, periodLabel: label, dryRun: !!dry_run,
   });
   res.json({ period: { start, end, label }, results });
-});
-app.post('/api/admin/reports/monthly-billing', auth, adminOnly, async (req, res) => {
+}));
+app.post('/api/admin/reports/monthly-billing', auth, adminOnly, ah(async (req, res) => {
   const now = new Date();
   const { year = now.getFullYear(), month = now.getMonth() + 1, dry_run = true } = req.body || {};
   res.json(await reports.sendMonthlyBilling({ year, month, dryRun: !!dry_run }));
-});
+}));
 app.get('/api/admin/report-log', auth, adminOnly, (req, res) => {
   res.json(db.prepare(`
     SELECT rl.*, c.name AS customer_name FROM report_log rl
